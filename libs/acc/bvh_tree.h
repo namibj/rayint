@@ -27,6 +27,18 @@ class BVHTree {
 public:
     typedef std::shared_ptr<BVHTree<IdxType, Vec3fType> > Ptr;
     typedef std::shared_ptr<const BVHTree<IdxType, Vec3fType> > ConstPtr;
+    typedef acc::AABB<Vec3fType> AABB;
+    
+    struct Node {
+        typedef IdxType ID;
+        IdxType first;
+        IdxType last;
+        ID left;
+        ID right;
+        AABB aabb;
+    };
+
+    typedef std::stack<typename Node::ID, std::vector<typename Node::ID>> Stack;
 
     typedef acc::Ray<Vec3fType> Ray;
     struct Hit {
@@ -41,17 +53,7 @@ public:
 private:
     static constexpr IdxType NAI = std::numeric_limits<IdxType>::max();
 
-    typedef acc::AABB<Vec3fType> AABB;
     typedef acc::Tri<Vec3fType> Tri;
-
-    struct Node {
-        typedef IdxType ID;
-        IdxType first;
-        IdxType last;
-        ID left;
-        ID right;
-        AABB aabb;
-    };
 
     struct Bin {
         IdxType n;
@@ -109,6 +111,7 @@ public:
         int max_threads = std::thread::hardware_concurrency());
 
     bool intersect(Ray ray, Hit * hit_ptr) const;
+    bool intersect(Ray ray, Hit * hit_ptr, Stack) const;
 };
 
 template <typename IdxType, typename Vec3fType>
@@ -368,13 +371,18 @@ BVHTree<IdxType, Vec3fType>::intersect(Ray const & ray, typename Node::ID node_i
 
 template <typename IdxType, typename Vec3fType> bool
 BVHTree<IdxType, Vec3fType>::intersect(Ray ray, Hit * hit_ptr) const {
+	auto stack = new std::stack<typename Node::ID, std::vector<typename Node::ID>>();
+	return intersect(ray, hit_ptr, *stack);
+}
+
+template <typename IdxType, typename Vec3fType> bool
+BVHTree<IdxType, Vec3fType>::intersect(Ray ray, Hit * hit_ptr, /*std::stack<typename Node::ID, std::vector<typename Node::ID>> */ Stack stack) const {
     Hit hit;
     hit.t = std::numeric_limits<float>::infinity();
-    std::stack<typename Node::ID> s;
 
-    s.push(0);
-    while (!s.empty()) {
-        typename Node::ID node_id = s.top(); s.pop();
+    stack.push(0);
+    while (!stack.empty()) {
+        typename Node::ID node_id = stack.top(); stack.pop();
         Node const & node = nodes[node_id];
         if (node.left != NAI && node.right != NAI) {
             float tmin_left, tmin_right;
@@ -382,15 +390,15 @@ BVHTree<IdxType, Vec3fType>::intersect(Ray ray, Hit * hit_ptr) const {
             bool right = acc::intersect(ray, nodes[node.right].aabb, &tmin_right);
             if (left && right) {
                 if (tmin_left < tmin_right) {
-                    s.push(node.right);
-                    s.push(node.left);
+                    stack.push(node.right);
+                    stack.push(node.left);
                 } else {
-                    s.push(node.left);
-                    s.push(node.right);
+                    stack.push(node.left);
+                    stack.push(node.right);
                 }
             } else {
-                if (right) s.push(node.right);
-                if (left) s.push(node.left);
+                if (right) stack.push(node.right);
+                if (left) stack.push(node.left);
             }
         } else {
             if (intersect(ray, node_id, &hit)) {
